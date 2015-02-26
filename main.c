@@ -25,7 +25,8 @@ int handle_one_request(struct client_s* client)
 	char* command;
 	char* arg;
 	// TODO IMPORTANT
-	int read_code = read_request(client->client_fd, &request, &);
+	int client_sock = client->client_fd;
+	int read_code = read_request(client_sock, &request, client);
 	if( read_code == 0 )
 	{
 		// Bad request format
@@ -38,9 +39,6 @@ int handle_one_request(struct client_s* client)
 	// get the command and arg from the structure
 	command = request.command;
 	arg = request.arg;
-	
-	int client_sock = client->client_fd;
-	
 	// Check if the file is being served by the server to the client. then , don't accept any commands
 	if( client->data_fd !=0 && client->file_fd != 0 )
 	{
@@ -128,10 +126,22 @@ int handle_one_request(struct client_s* client)
 	}
 	else
 	{
-		Write( client_sock, error, strlen(error), open_desc, open_desc_count);
+		Write( client_sock, error, strlen(error), client);
 		return -1;
 	}
 	return 1;
+}
+
+void add_fds_from_clients_list(fd_set* fds, struct client_s* client, int count )
+{
+	int i;
+	for(i=0;i<count;i++)
+	{
+		if( client[i].client_fd != 0 )
+		{
+			FD_SET(client[i].client_fd, fds);
+		}
+	}
 }
 
 void thread_function(void* arg)
@@ -152,26 +162,26 @@ void thread_function(void* arg)
 	// Connected to master server
 	// Do fd stuff now
 	fd_set fds;
+	int i;
 	char buff[BUFF_SIZE];
 	while( TRUE )
 	{
 		FD_ZERO(&fds);
 		// Set the slave fd to read in new clients
-		FD_SET(slave, &fds) 
+		FD_SET(slave, &fds); 
 		// Set all the existing clients
 		// Only control connection fds are set in the fd_set
-		add_fds_from_clients_list(&fds,&clients,client_count);
-		int res =  select(FD_SETSIZE, &fds, NULL, &fds, tv_struct);
+		add_fds_from_clients_list(&fds,clients,clients_count);
+		int res =  select(FD_SETSIZE, &fds, NULL, &fds, &tv_struct);
 		if( res == -1 )
 		{
 			// Error with select call, continue again
-			perror("Select in thread %d\n",thread_no);
+			printf("ERROR: Select in thread %d\n",thread_no);
 			continue;
 		}
 		else if( res == 0 )
 		{
 			// No descriptors are set
-			printf("No descriptors set\n");
 		}
 		else if( res > 0 )
 		{
@@ -179,28 +189,17 @@ void thread_function(void* arg)
 			// Check if any new clients came
 			if( FD_ISSET(slave, &fds) )
 			{
-				int any_new_client_fds = 1;
 				// Read all the FD's given by the master to this thread
 
-				// TODO IMPLEMENT NON BLOCKING IO
-				while( any_new_client_fds )
-				{
-					struct client_s* cli = &clients[client_count];
-					int read_desc = read_descriptor(slave, open_desc, open_desc_count); 
-					if( read_desc == -1 )
-					{
-						// No descriptor present on the buffer to read
-						any_new_client_fds = 0;
-						// End the loop
-					}
-					cli->client_fd = read_desc;
-					cli->file_fd = 0;
-					cli->data_fd = 0;
-					bzero( (void*)&(cli->act_mode_client_addr), sizeof(cli->act_mode_client_addr) );
-					// Send a greeting
-					Write(cli->client_fd, greeting, strlen(greeting), &cli);
-					clients_count++;
-				}
+				struct client_s* cli = &clients[clients_count];
+				int read_desc = read_descriptor(slave,cli); 
+				cli->client_fd = read_desc;
+				cli->file_fd = 0;
+				cli->data_fd = 0;
+				bzero( (void*)&(cli->act_mode_client_addr), sizeof(cli->act_mode_client_addr) );
+				// Send a greeting
+				Write(cli->client_fd, greeting, strlen(greeting), cli);
+				clients_count++;
 				// Clear this descriptor, so that ir wont be read again in this iteration of select.
 				FD_CLR(slave, &fds);
 			}	

@@ -118,10 +118,10 @@ int monitoring_thread()
 }
 
 
-int read_descriptor(int slave, int* open_desc, int open_desc_count)
+int read_descriptor(int slave, struct client_s* client)
 {
 	int client_fd;
-	int n = Read(slave,(char*)&client_fd,FD_SIZE,open_desc,open_desc_count);
+	int n = Read(slave,(char*)&client_fd,FD_SIZE,client);
 	if( n == FD_SIZE )
 	{
 		return client_fd;

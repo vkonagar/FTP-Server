@@ -58,7 +58,7 @@ int read_request(int client_sock, ftp_request_t* request, struct client_s* clien
 
 int clean_up_client_structure(struct client_s* client)
 {
-	if( client->clientfd != 0 )
+	if( client->client_fd != 0 )
 	{
 		close(client->client_fd);
 	}
@@ -77,7 +77,7 @@ int clean_up_client_structure(struct client_s* client)
 
 
 /* Invoker of this function will retry on error */
-int Connect(int socket, struct sockaddr* addr)
+int Connect(int socket, struct sockaddr* addr, int len)
 {
 	if( connect( socket, addr, len) != 0 )
 	{
@@ -162,7 +162,7 @@ int Read(int clientfd, char* buffer, int size, struct client_s* client)
 				continue;
 			perror("Error in reading the line in readLine function : handle_client.h\n");
 			if( client!= NULL )
-				clean_up_client_structure(&client);
+				clean_up_client_structure(client);
 			return -1;
 		}
 		else if( chars_read == 0 )
@@ -177,7 +177,7 @@ int Read(int clientfd, char* buffer, int size, struct client_s* client)
 	Write function: On error, the client's control and data connection are closed. File descriptor is also closed.
 */
 
-int Write(int clientfd, char* buff, int len,  struct client_s* client)
+int Write(int clientfd, char* buff, int len, struct client_s* client)
 {
 	int left_chars = len;
 	int written_chars = 0;
@@ -197,7 +197,7 @@ int Write(int clientfd, char* buff, int len,  struct client_s* client)
 			{
 				perror("Error with writing\n");
 				if( client!= NULL )
-					clean_up_client_structure(&client);
+					clean_up_client_structure(client);
 				return -1;
 			}
 		}
