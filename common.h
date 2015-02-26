@@ -56,7 +56,6 @@ struct client_s
 	int data_fd;
 	int file_fd;
 	struct sockaddr_in act_mode_client_addr;
-	int open_desc[MAX_OPEN_DESC_CLIENT];
 };
 
 
@@ -122,8 +121,12 @@ int monitoring_thread()
 int read_descriptor(int slave, int* open_desc, int open_desc_count)
 {
 	int client_fd;
-	Read(slave,(char*)&client_fd,FD_SIZE,open_desc,open_desc_count);
-	return client_fd;
+	int n = Read(slave,(char*)&client_fd,FD_SIZE,open_desc,open_desc_count);
+	if( n == FD_SIZE )
+	{
+		return client_fd;
+	}
+	return -1;
 }
 
 

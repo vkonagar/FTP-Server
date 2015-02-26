@@ -12,43 +12,142 @@ struct sockaddr_in master_server_addr;
 // Timeval structure for slaves
 struct timeval tv_struct;
 
-void handle_one_request(struct client_s* client)
+/*
+	-1 is returned when the request format is wrong
+	1 is returned when the request format is correct
+*/
+
+int handle_one_request(struct client_s* client)
 {
 	// Handle the request for the client.
 	ftp_request_t request;
 	bzero((void*)&request,sizeof(request));
 	char* command;
 	char* arg;
-
-	// TODO add the support of open_desc to the existing system calls. Use client structure to store open desc and pass for all the functions
-	// accordingly
 	// TODO IMPORTANT
-	if( read_request(client->client_fd, &request, client->open_desc, client->open_desc_count) == 0 )
+	int read_code = read_request(client->client_fd, &request, &);
+	if( read_code == 0 )
 	{
-		printf("Bad Command\n");
-		Write(client_sock, error, strlen(error), client->open_desc, client->open_desc_count);
+		// Bad request format
+		printf("Bad request format\n");
+		Write(client_sock, error, strlen(error), client);
+		// Close and clean up
+		clean_up_client_structure(client);
+		return -1;
 	}
 	// get the command and arg from the structure
 	command = request.command;
 	arg = request.arg;
+	
+	int client_sock = client->client_fd;
+	
+	// Check if the file is being served by the server to the client. then , don't accept any commands
+	if( client->data_fd !=0 && client->file_fd != 0 )
+	{
+		// FILE is served
+		return 1;
+	}
+
+	if( strcmp(command,"USER") == 0 )
+	{
+		// USER REQUEST
+		Write(client_sock, allow_user, strlen(allow_user), client);
+	}
+	else if( strcmp(command,"SYST") == 0 )
+	{
+		// SYSTEM REQUEST
+		Write(client_sock, system_str, strlen(system_str), client);
+	}
+	else if( strcmp(command,"PORT") == 0 )
+	{
+		// PORT COMMAND
+		// Send reply
+		Write(client_sock, port_reply, strlen(port_reply), client);
+		// Argument is of form h1,h2,h3,h4,p1,p2
+		store_ip_port_active(arg,&(client->act_mode_client_addr));
+	}
+	else if( strcmp(command,"TYPE") == 0 )
+	{
+		Write(client_sock, type_ok, strlen(type_ok), client);
+	}
+	else if( strcmp(command,"QUIT") == 0 )
+	{
+		// Child exited
+		Write(client_sock, close_con, strlen(close_con), client);
+		// break and free the client_sock
+		return -1;
+	}
+	else if( (strcmp(command,"LIST") == 0 ) || (strcmp(command,"RETR") == 0 ))
+	{
+		// RETR
+		// Argument will have the file name
+		int file;
+		if( strcmp(command,"LIST") == 0)
+		{
+			// Execute the list command and store it in a file
+			system("ls -l > .list");
+			// Now open that file and send it to the client
+			file = open(".list",O_RDONLY);
+		}
+		else
+		{
+			file = open(arg,O_RDONLY);
+		}
+		if( file == -1 )
+		{
+			perror("Open");
+			Write(client_sock, file_error, strlen(file_error), client);
+			// If the file open has error, quit the connection.
+			return -1;
+		}
+		// FILE OK
+		// Store the file fd in the struct
+		client->file_fd = file;
+		// Write File OK
+		Write(client_sock, file_ok, strlen(file_ok), client);
+		// Now transfer the file to the client
+		int data_sock = Socket(AF_INET, SOCK_STREAM, 0);
+		if( data_sock == -1 )
+		{
+			perror("Socket");
+			return -1;
+		}	
+		if( connect(data_sock, (struct sockaddr*)&(client->act_mode_client_addr), sizeof(client->act_mode_client_addr)) == -1 )
+		{
+			printf("Cant establish data connection to %d\n", ntohs(client->act_mode_client_addr.sin_port));
+			// Close existing fd's related to this command
+			Write(client_sock, data_open_error, strlen(data_open_error), client);
+			return -1;
+		}
+		else
+		{
+			// Connection established
+			printf("Connection established from server to client\n");
+			client->data_fd = data_sock;
+		}
+	}
+	else
+	{
+		Write( client_sock, error, strlen(error), open_desc, open_desc_count);
+		return -1;
+	}
+	return 1;
 }
 
 void thread_function(void* arg)
 {
 	int thread_no = (int)arg;
-	int open_desc[1];
-	int open_desc_count = 0;
 	// Create structures for the clients
 	struct client_s clients[CLIENTS_PER_THREAD];
 	int clients_count = 0;
 
 	// Connect to the master thread
-	int slave = Socket(AF_INET, SOCK_STREAM, 0, open_desc, open_desc_count);
-	open_desc[open_desc_count++] = slave;
-	if( Connect( slave, (struct sockaddr*)&master_server_addr, sizeof(master_server_addr), open_desc, open_desc_count) == -1 )
+	int slave = Socket(AF_INET, SOCK_STREAM, 0);
+	if( Connect( slave, (struct sockaddr*)&master_server_addr, sizeof(master_server_addr) ) == -1 )
 	{
 		printf("Can't connect to master server... Exiting\n");
-		exit(0);
+		close(slave);
+		pthread_exit(0);
 	}
 	// Connected to master server
 	// Do fd stuff now
@@ -65,11 +164,14 @@ void thread_function(void* arg)
 		int res =  select(FD_SETSIZE, &fds, NULL, &fds, tv_struct);
 		if( res == -1 )
 		{
-			//error
+			// Error with select call, continue again
+			perror("Select in thread %d\n",thread_no);
+			continue;
 		}
 		else if( res == 0 )
 		{
 			// No descriptors are set
+			printf("No descriptors set\n");
 		}
 		else if( res > 0 )
 		{
@@ -77,29 +179,45 @@ void thread_function(void* arg)
 			// Check if any new clients came
 			if( FD_ISSET(slave, &fds) )
 			{
-				// Can be optimized to take multiple fds at a time
-				// New client, so add it to the list
-				struct client_s* cli = &clients[client_count];
-				cli->client_fd = read_descriptor(slave, open_desc, open_desc_count); 
-				cli->file_fd = 0;
-				cli->data_fd = 0;
-				bzero( (void*)&(cli->act_mode_client_addr), sizeof(cli->act_mode_client_addr) );
-				// Send a greeting
-				Write(cli->client_fd, greeting, strlen(greeting), open_desc, open_desc_count);
-				// Any TODO new files to be cleared here.
-				clients_count++;
+				int any_new_client_fds = 1;
+				// Read all the FD's given by the master to this thread
+
+				// TODO IMPLEMENT NON BLOCKING IO
+				while( any_new_client_fds )
+				{
+					struct client_s* cli = &clients[client_count];
+					int read_desc = read_descriptor(slave, open_desc, open_desc_count); 
+					if( read_desc == -1 )
+					{
+						// No descriptor present on the buffer to read
+						any_new_client_fds = 0;
+						// End the loop
+					}
+					cli->client_fd = read_desc;
+					cli->file_fd = 0;
+					cli->data_fd = 0;
+					bzero( (void*)&(cli->act_mode_client_addr), sizeof(cli->act_mode_client_addr) );
+					// Send a greeting
+					Write(cli->client_fd, greeting, strlen(greeting), &cli);
+					clients_count++;
+				}
+				// Clear this descriptor, so that ir wont be read again in this iteration of select.
 				FD_CLR(slave, &fds);
-			}
-		}
-		// Now serve the requests and files to the clients
-		// Clients not having the data_fd as 0, will be served for the files, otherwise will be served for the requests.
-		// Go to each client fd and check if it is set
-		for(i=0;i<clients_count;i++)
-		{
-			if( FD_ISSET(clients[i].client_fd,&fds) )
+			}	
+			// Now serve the requests and files to the clients
+			// Clients not having the data_fd as 0, will be served for the files, otherwise will be served for the requests.
+			// Go to each client fd and check if it is set
+			for(i=0;i<clients_count;i++)
 			{
-				// Its set, so serve this client for one request
-				
+				if( FD_ISSET(clients[i].client_fd,&fds) )
+				{
+					// Its set, so serve this client for one request
+					if( handle_one_request(&clients[i]) == -1 )
+					{
+						// Some error in the commands. Quit the connection
+						clean_up_client_structure(&clients[i]);
+					}
+				}
 			}
 		}
 		// Now do the pending file IO
@@ -112,20 +230,16 @@ void thread_function(void* arg)
 			{
 				int n;
 				//File opened, so write one block of data.
-				if( ( n = Read(fd_cli_file, buff, BUFF_SIZE, open_desc, open_desc_count)) == 0 )
+				if( ( n = Read(fd_cli_file, buff, BUFF_SIZE, &clients[i])) == 0 )
 				{
 					// File is completely read, so close all of the descriptors
-					close(fd_cli_file);
-					close(fd_cli_data);
-					close(fd_cli_control);
 					// Clean up the entries on the structure, so that this is not used again
-					clients[i].file_fd = 0;
-					clients[i].client_fd = 0;
-					clients[i].data_fd = 0;
+					Write(fd_cli_control, file_done, strlen(file_done), &clients[i]);
+					clean_up_client_structure(&clients[i]);
 				}
 				else
 				{
-					Write(clients[i].data_fd, buff, n, open_desc, open_desc_count);
+					Write(clients[i].data_fd, buff, n, &clients[i]);
 				}
 			}
 		}
@@ -135,8 +249,6 @@ void thread_function(void* arg)
 
 int main()
 {
-	int open_desc[1];
-	int open_desc_count;
 	sigignore(SIGPIPE);
 	signal(SIGTERM, sig_term_handler);
 
@@ -176,7 +288,7 @@ int main()
 	}
 
 	// This is the listen socket on 21
-	int listen_sock = Socket(AF_INET, SOCK_STREAM, 0, open_desc, open_desc_count);
+	int listen_sock = Socket(AF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in server_addr;
 	server_addr.sin_port = htons(21);
 	server_addr.sin_family = AF_INET;
@@ -229,7 +341,7 @@ int main()
 
 	// Step 1:
 	// Make a listening socket for the slave
-	int master_server = Socket(AF_INET, SOCK_STREAM, 0, open_desc, open_desc_count);
+	int master_server = Socket(AF_INET, SOCK_STREAM, 0);
 	master_server_addr.sin_port = htons(MASTER_PORT); // Echo port
 	master_server_addr.sin_family = AF_INET;
 	inet_pton(AF_INET, "127.0.0.1", &(master_server_addr.sin_addr));
@@ -280,7 +392,7 @@ int main()
 		printf("Clients count : %d\n",clients_count);
 		int index = clients_count/CLIENTS_PER_THREAD;
 		// Send to the FD present on the slave array at this index
-		Write(slave_fd_array[index], (char*)&client_sock, FD_SIZE, open_desc, open_desc_count);
+		Write(slave_fd_array[index], (char*)&client_sock, FD_SIZE, NULL);
 		printf("Written a new client:%d to %d thread\n",client_sock,index);
 		clients_count++;
 	}
