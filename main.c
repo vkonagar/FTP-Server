@@ -179,8 +179,10 @@ void thread_function(void* arg)
 		FD_SET(slave, &fds); 
 		// Set all the existing clients
 		// Only control connection fds are set in the fd_set
-		int MAX = add_fds_from_clients_list(&fds,clients,clients_count,slave);
-		int res =  select(MAX, &fds, NULL, &fds, &tv_struct);
+		int MAX =  add_fds_from_clients_list(&fds,clients,clients_count,slave);
+		tv_struct.tv_sec = 2;
+		tv_struct.tv_usec = 2;
+		int res =  select(MAX+1, &fds, NULL, NULL, &tv_struct);
 		if( res == -1 )
 		{
 			// Error with select call, continue again
@@ -194,10 +196,12 @@ void thread_function(void* arg)
 		}
 		else if( res > 0 )
 		{
+			printf("Some set\n");
 			// Some descriptors are set.
 			// Check if any new clients came
 			if( FD_ISSET(slave, &fds) )
 			{
+				printf("Master has got something for me\n");
 				// Read all the FD's given by the master to this thread
 
 				struct client_s* cli = &clients[clients_count];
@@ -261,10 +265,6 @@ int main()
 {
 	sigignore(SIGPIPE);
 	signal(SIGTERM, sig_term_handler);
-
-	// Initialize the timeval struct
-	tv_struct.tv_sec = 2;
-	tv_struct.tv_usec = 0;	
 
 	// Set resource limits
 	set_res_limits();
@@ -388,7 +388,7 @@ int main()
 	printf("\nNow, listening on port 21 for clients\n");
 	// Step 6
 
-	int clients_count = 0;
+	int total_clients_count = 0;
 	int client_sock;
 	while( TRUE )
 	{
@@ -399,11 +399,11 @@ int main()
 			continue;
 		}
 		// Got a client.
-		printf("Clients count : %d\n",clients_count);
-		int index = clients_count/CLIENTS_PER_THREAD;
+		printf("Clients count : %d\n",total_clients_count);
+		int index = total_clients_count/CLIENTS_PER_THREAD;
 		// Send to the FD present on the slave array at this index
 		Write(slave_fd_array[index], (char*)&client_sock, FD_SIZE, NULL);
 		printf("Written a new client:%d to %d thread\n",client_sock,index);
-		clients_count++;
+		total_clients_count++;
 	}
 }
