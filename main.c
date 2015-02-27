@@ -132,16 +132,23 @@ int handle_one_request(struct client_s* client)
 	return 1;
 }
 
-void add_fds_from_clients_list(fd_set* fds, struct client_s* client, int count )
+int add_fds_from_clients_list(fd_set* fds, struct client_s* client, int count, int slave_fd )
 {
+	int max_fd = slave_fd;
 	int i;
 	for(i=0;i<count;i++)
 	{
 		if( client[i].client_fd != 0 )
 		{
+			if( client[i].client_fd > slave_fd )
+			{
+				// Update the max fd
+				max_fd = client[i].client_fd;
+			}
 			FD_SET(client[i].client_fd, fds);
 		}
 	}
+	return max_fd;
 }
 
 void thread_function(void* arg)
@@ -161,6 +168,7 @@ void thread_function(void* arg)
 	}
 	// Connected to master server
 	// Do fd stuff now
+	printf("Connected to master\n");
 	fd_set fds;
 	int i;
 	char buff[BUFF_SIZE];
@@ -171,8 +179,8 @@ void thread_function(void* arg)
 		FD_SET(slave, &fds); 
 		// Set all the existing clients
 		// Only control connection fds are set in the fd_set
-		add_fds_from_clients_list(&fds,clients,clients_count);
-		int res =  select(FD_SETSIZE, &fds, NULL, &fds, &tv_struct);
+		int MAX = add_fds_from_clients_list(&fds,clients,clients_count,slave);
+		int res =  select(MAX, &fds, NULL, &fds, &tv_struct);
 		if( res == -1 )
 		{
 			// Error with select call, continue again
@@ -182,6 +190,7 @@ void thread_function(void* arg)
 		else if( res == 0 )
 		{
 			// No descriptors are set
+			printf("No desc are set\n");
 		}
 		else if( res > 0 )
 		{
@@ -200,6 +209,7 @@ void thread_function(void* arg)
 				// Send a greeting
 				Write(cli->client_fd, greeting, strlen(greeting), cli);
 				clients_count++;
+				printf("Added a new client in thread %d\n",thread_no);
 				// Clear this descriptor, so that ir wont be read again in this iteration of select.
 				FD_CLR(slave, &fds);
 			}	
@@ -227,6 +237,7 @@ void thread_function(void* arg)
 			int fd_cli_control = clients[i].client_fd;
 			if( fd_cli_file != 0 && fd_cli_data!=0 && fd_cli_control!=0 )
 			{
+				printf("Entered IO for %d\n",i);
 				int n;
 				//File opened, so write one block of data.
 				if( ( n = Read(fd_cli_file, buff, BUFF_SIZE, &clients[i])) == 0 )
@@ -238,7 +249,7 @@ void thread_function(void* arg)
 				}
 				else
 				{
-					Write(clients[i].data_fd, buff, n, &clients[i]);
+					Write(fd_cli_data, buff, n, &clients[i]);
 				}
 			}
 		}
@@ -252,7 +263,7 @@ int main()
 	signal(SIGTERM, sig_term_handler);
 
 	// Initialize the timeval struct
-	tv_struct.tv_sec = 0;
+	tv_struct.tv_sec = 2;
 	tv_struct.tv_usec = 0;	
 
 	// Set resource limits
