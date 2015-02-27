@@ -197,7 +197,7 @@ int Write(int clientfd, char* buff, int len, struct client_s* client)
 			}
 			else
 			{
-				perror("Error with writing\n");
+				perror("Error with writing EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEeee\n");
 				if( client!= NULL )
 				{
 					clean_up_client_structure(client);

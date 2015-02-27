@@ -20,8 +20,8 @@
 #include <sys/select.h>
 // ############# Server parameters #############
 
-#define CLIENTS_PER_THREAD 5
-#define TOTAL_NO_THREADS 2
+#define CLIENTS_PER_THREAD 20
+#define TOTAL_NO_THREADS 100
 
 // #############################################
 

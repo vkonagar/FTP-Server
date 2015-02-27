@@ -144,11 +144,11 @@ int handle_one_request(struct client_s* client)
 	return 1;
 }
 
-int add_fds_from_clients_list(fd_set* read_fds, fd_set* write_fds, struct client_s* client, int count, int slave_fd )
+int add_fds_from_clients_list(fd_set* read_fds, fd_set* write_fds, struct client_s* client, int slave_fd )
 {
 	int max_fd = slave_fd;
 	int i;
-	for(i=0;i<count;i++)
+	for(i=0;i<CLIENTS_PER_THREAD;i++)
 	{
 		if( client[i].client_fd != 0 )
 		{
@@ -200,11 +200,11 @@ void thread_function(void* arg)
 		// Set the slave fd to read in new clients
 		FD_SET(slave, &fds); 
 		// Set all the existing clients
-		tv_struct.tv_sec = 1;
+		tv_struct.tv_sec = 0;
 		tv_struct.tv_usec = 0;
 		// Only control connection fds are set in the fd_set
-		int MAX =  add_fds_from_clients_list(&fds, &write_fds, clients, *clients_count, slave);
-		int res =  select(MAX+1, &fds, &write_fds, NULL, &tv_struct);
+		int MAX =  add_fds_from_clients_list(&fds, &write_fds, clients, slave);
+		int res =  select(MAX+1, &fds, &write_fds, NULL, NULL);
 		if( res == -1 )
 		{
 			// Error with select call, continue again
@@ -217,7 +217,7 @@ void thread_function(void* arg)
 		}
 		else if( res > 0 )
 		{
-			printf("Some set\n");
+			//printf("Some set\n");
 			// Some descriptors are set.
 			// Check if any new clients came
 			if( FD_ISSET(slave, &fds) )
@@ -234,15 +234,20 @@ void thread_function(void* arg)
 				// Send a greeting
 				Write(cli->client_fd, greeting, strlen(greeting), cli);
 				(*clients_count)++;
-				printf("Added a new client in thread %d\n",thread_no);
+				//printf("Added a new client in thread %d\n",thread_no);
 				// Clear this descriptor, so that ir wont be read again in this iteration of select.
 				FD_CLR(slave, &fds);
 			}	
 			// Now serve the requests and files to the clients
 			// Clients not having the data_fd as 0, will be served for the files, otherwise will be served for the requests.
 			// Go to each client fd and check if it is set
-			for(i=0;i<*clients_count;i++)
+			for(i=0;i<CLIENTS_PER_THREAD;i++)
 			{
+				if( clients[i].client_fd == 0 )
+				{
+					// Client not active
+					continue;
+				}
 				if( FD_ISSET(clients[i].client_fd,&fds) )
 				{
 					// Its set, so serve this client for one request
@@ -256,20 +261,21 @@ void thread_function(void* arg)
 			}
 		}
 		// Now do the pending file IO
-		for(i=0;i<*clients_count;i++)
+		for(i=0;i<CLIENTS_PER_THREAD;i++)
 		{
 			int fd_cli_file = clients[i].file_fd;
 			int fd_cli_data = clients[i].data_fd;
 			int fd_cli_control = clients[i].client_fd;
 			if( fd_cli_file != 0 && fd_cli_data!=0 && fd_cli_control!=0 )
 			{
-				printf("Entered IO for %d\n",i);
+				//printf("Entered IO for %d\n",i);
 				int n;
 				//File opened, so write one block of data.
 				if( ( n = Read(fd_cli_file, buff, BUFF_SIZE, &clients[i])) == 0 )
 				{
 					// File is completely read, so close all of the descriptors
 					// Clean up the entries on the structure, so that this is not used again
+					Write(fd_cli_data, "\r\n", 2, &clients[i]);
 					Write(fd_cli_control, file_done, strlen(file_done), &clients[i]);
 					clean_up_client_structure(&clients[i]);
 					(*clients_count)--;
@@ -291,7 +297,7 @@ void thread_function(void* arg)
 int main()
 {
 	sigignore(SIGPIPE);
-	signal(SIGTERM, sig_term_handler);
+	signal(SIGINT, sig_term_handler);
 
 	// Set resource limits
 	set_res_limits();
