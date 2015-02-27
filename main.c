@@ -12,11 +12,30 @@ struct sockaddr_in master_server_addr;
 // Timeval structure for slaves
 struct timeval tv_struct;
 
+// connected clients count for each thread
+
+int thread_clients_count[TOTAL_NO_THREADS];
+/*
+	Monitoring thread
+*/
+
+void monitor()
+{
+	int i;
+	while( 1 )
+	{
+		sleep(5);
+		for(i=0;i<TOTAL_NO_THREADS;i++)
+		{
+			printf("Thread %d : %d\n",i,thread_clients_count[i]);
+		}
+	}
+}
+
 /*
 	-1 is returned when the request format is wrong
 	1 is returned when the request format is correct
 */
-
 int handle_one_request(struct client_s* client)
 {
 	// Handle the request for the client.
@@ -40,12 +59,6 @@ int handle_one_request(struct client_s* client)
 	command = request.command;
 	arg = request.arg;
 	// Check if the file is being served by the server to the client. then , don't accept any commands
-	if( client->data_fd !=0 && client->file_fd != 0 )
-	{
-		// FILE is served
-		return 1;
-	}
-
 	if( strcmp(command,"USER") == 0 )
 	{
 		// USER REQUEST
@@ -132,7 +145,7 @@ int handle_one_request(struct client_s* client)
 	return 1;
 }
 
-int add_fds_from_clients_list(fd_set* fds, struct client_s* client, int count, int slave_fd )
+int add_fds_from_clients_list(fd_set* read_fds, fd_set* write_fds, struct client_s* client, int count, int slave_fd )
 {
 	int max_fd = slave_fd;
 	int i;
@@ -145,7 +158,15 @@ int add_fds_from_clients_list(fd_set* fds, struct client_s* client, int count, i
 				// Update the max fd
 				max_fd = client[i].client_fd;
 			}
-			FD_SET(client[i].client_fd, fds);
+			FD_SET(client[i].client_fd, read_fds);
+			// This is for writing the file back to the client. Fd's should be write ready!
+			if( client[i].data_fd != 0 )
+			{
+				// Set the fd for write
+				FD_SET(client[i].data_fd, write_fds);
+				// Update the max_fd
+				max_fd = ( client[i].data_fd > max_fd ) ? client[i].data_fd : max_fd;
+			}
 		}
 	}
 	return max_fd;
@@ -170,19 +191,21 @@ void thread_function(void* arg)
 	// Do fd stuff now
 	printf("Connected to master\n");
 	fd_set fds;
+	fd_set write_fds;
 	int i;
 	char buff[BUFF_SIZE];
 	while( TRUE )
 	{
 		FD_ZERO(&fds);
+		FD_ZERO(&write_fds);
 		// Set the slave fd to read in new clients
 		FD_SET(slave, &fds); 
 		// Set all the existing clients
+		tv_struct.tv_sec = 1;
+		tv_struct.tv_usec = 0;
 		// Only control connection fds are set in the fd_set
-		int MAX =  add_fds_from_clients_list(&fds,clients,clients_count,slave);
-		tv_struct.tv_sec = 2;
-		tv_struct.tv_usec = 2;
-		int res =  select(MAX+1, &fds, NULL, NULL, &tv_struct);
+		int MAX =  add_fds_from_clients_list(&fds, &write_fds, clients, clients_count, slave);
+		int res =  select(MAX+1, &fds, &write_fds, NULL, &tv_struct);
 		if( res == -1 )
 		{
 			// Error with select call, continue again
