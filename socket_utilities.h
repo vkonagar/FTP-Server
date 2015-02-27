@@ -162,7 +162,9 @@ int Read(int clientfd, char* buffer, int size, struct client_s* client)
 				continue;
 			perror("Error in reading the line in readLine function : handle_client.h\n");
 			if( client!= NULL )
+			{
 				clean_up_client_structure(client);
+			}
 			return -1;
 		}
 		else if( chars_read == 0 )
@@ -197,7 +199,9 @@ int Write(int clientfd, char* buff, int len, struct client_s* client)
 			{
 				perror("Error with writing\n");
 				if( client!= NULL )
+				{
 					clean_up_client_structure(client);
+				}
 				return -1;
 			}
 		}

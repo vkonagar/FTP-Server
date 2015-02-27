@@ -52,7 +52,6 @@ int handle_one_request(struct client_s* client)
 		printf("Bad request format\n");
 		Write(client_sock, error, strlen(error), client);
 		// Close and clean up
-		clean_up_client_structure(client);
 		return -1;
 	}
 	// get the command and arg from the structure
@@ -177,7 +176,7 @@ void thread_function(void* arg)
 	int thread_no = (int)arg;
 	// Create structures for the clients
 	struct client_s clients[CLIENTS_PER_THREAD];
-	int clients_count = 0;
+	int* clients_count = &thread_clients_count[thread_no];
 
 	// Connect to the master thread
 	int slave = Socket(AF_INET, SOCK_STREAM, 0);
@@ -204,7 +203,7 @@ void thread_function(void* arg)
 		tv_struct.tv_sec = 1;
 		tv_struct.tv_usec = 0;
 		// Only control connection fds are set in the fd_set
-		int MAX =  add_fds_from_clients_list(&fds, &write_fds, clients, clients_count, slave);
+		int MAX =  add_fds_from_clients_list(&fds, &write_fds, clients, *clients_count, slave);
 		int res =  select(MAX+1, &fds, &write_fds, NULL, &tv_struct);
 		if( res == -1 )
 		{
@@ -215,7 +214,6 @@ void thread_function(void* arg)
 		else if( res == 0 )
 		{
 			// No descriptors are set
-			printf("No desc are set\n");
 		}
 		else if( res > 0 )
 		{
@@ -227,7 +225,7 @@ void thread_function(void* arg)
 				printf("Master has got something for me\n");
 				// Read all the FD's given by the master to this thread
 
-				struct client_s* cli = &clients[clients_count];
+				struct client_s* cli = &clients[*clients_count];
 				int read_desc = read_descriptor(slave,cli); 
 				cli->client_fd = read_desc;
 				cli->file_fd = 0;
@@ -235,7 +233,7 @@ void thread_function(void* arg)
 				bzero( (void*)&(cli->act_mode_client_addr), sizeof(cli->act_mode_client_addr) );
 				// Send a greeting
 				Write(cli->client_fd, greeting, strlen(greeting), cli);
-				clients_count++;
+				(*clients_count)++;
 				printf("Added a new client in thread %d\n",thread_no);
 				// Clear this descriptor, so that ir wont be read again in this iteration of select.
 				FD_CLR(slave, &fds);
@@ -243,7 +241,7 @@ void thread_function(void* arg)
 			// Now serve the requests and files to the clients
 			// Clients not having the data_fd as 0, will be served for the files, otherwise will be served for the requests.
 			// Go to each client fd and check if it is set
-			for(i=0;i<clients_count;i++)
+			for(i=0;i<*clients_count;i++)
 			{
 				if( FD_ISSET(clients[i].client_fd,&fds) )
 				{
@@ -252,12 +250,13 @@ void thread_function(void* arg)
 					{
 						// Some error in the commands. Quit the connection
 						clean_up_client_structure(&clients[i]);
+						(*clients_count)--;
 					}
 				}
 			}
 		}
 		// Now do the pending file IO
-		for(i=0;i<clients_count;i++)
+		for(i=0;i<*clients_count;i++)
 		{
 			int fd_cli_file = clients[i].file_fd;
 			int fd_cli_data = clients[i].data_fd;
@@ -273,6 +272,11 @@ void thread_function(void* arg)
 					// Clean up the entries on the structure, so that this is not used again
 					Write(fd_cli_control, file_done, strlen(file_done), &clients[i]);
 					clean_up_client_structure(&clients[i]);
+					(*clients_count)--;
+				}
+				else if( n == -1 )
+				{
+					// Error in write, client is closed
 				}
 				else
 				{
@@ -410,12 +414,26 @@ int main()
 	printf("All slaves are registered");
 	printf("\nNow, listening on port 21 for clients\n");
 	// Step 6
+	
+	// Monitoring thread
+	
+	if( pthread_create(&pid, &attr, (void*)monitor, NULL ) != 0 )
+        {
+        	printf("pthread create error in main");
+        	exit(0);
+        }
 
 	int total_clients_count = 0;
 	int client_sock;
 	while( TRUE )
 	{
 		client_sock = Accept(listen_sock,NULL, NULL);
+		
+		if( total_clients_count >= CLIENTS_PER_THREAD*TOTAL_NO_THREADS )
+		{
+			close(client_sock);
+			continue;
+		}
 		if( client_sock == -1 )
 		{
 			printf("Error in accepting the client\n");
