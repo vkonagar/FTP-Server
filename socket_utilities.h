@@ -58,6 +58,7 @@ int read_request(int client_sock, ftp_request_t* request, struct client_s* clien
 
 int clean_up_client_structure(struct client_s* client)
 {
+	Write(client->client_fd, close_con, strlen(close_con), client);
 	if( client->client_fd != 0 )
 	{
 		close(client->client_fd);

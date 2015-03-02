@@ -8,6 +8,16 @@
 // These structures are used by all the threads to connect to the master server
 struct sockaddr_in master_server_addr;
 
+
+void monitor()
+{
+	while(1)
+	{
+		printf("Count : %d\n",threads_active);
+		sleep(2);
+	}
+}
+
 // connected clients count for each thread
 int thread_clients_count[TOTAL_NO_THREADS];
 /*
@@ -16,6 +26,7 @@ int thread_clients_count[TOTAL_NO_THREADS];
 */
 int handle_one_request(struct client_s* client, int epfd, int client_count,struct epoll_event* one_event)
 {
+	int ret;
 	printf(" iam in handle req\n");
 	// Handle the request for the client.
 	ftp_request_t request;
@@ -121,7 +132,7 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 			one_event->events = EPOLLOUT;
 			
 			// Set this fd for writing
-			int ret = epoll_ctl (epfd, EPOLL_CTL_ADD, data_sock, one_event);
+			ret = epoll_ctl (epfd, EPOLL_CTL_ADD, data_sock, one_event);
 			if (ret)
 			{
 				perror ("epoll_ctl");
@@ -129,6 +140,16 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 				printf("ERROR iN ADDING THE DATA FD\n");
 				return -1;
 			}
+			// Now dont look for an event of the client fd until this file is tranferred.
+			ret = epoll_ctl (epfd, EPOLL_CTL_DEL, client_sock, one_event);
+			if (ret)
+			{
+				perror ("epoll_ctl");
+				// TODO ERROR
+				printf("ERROR iN ADDING THE DATA FD\n");
+				return -1;
+			}
+			increment_thread_count();
 		}
 	}
 	else
@@ -204,7 +225,7 @@ void thread_function(void* arg)
 			Add all the client_fds, data_fds, and slave
 			-1 as timeout will block untill some of them are ready.
 		*/
-		nr_events = epoll_wait (epfd, all_events, MAX_EVENTS, -1);
+		nr_events = epoll_wait(epfd, all_events, MAX_EVENTS, -1);
 		if (nr_events < 0)
 		{
 		        perror ("epoll_wait");
@@ -278,7 +299,9 @@ void thread_function(void* arg)
 					// Some error in the commands. Quit the connection
 					clean_up_client_structure(&clients[cur_cid]);
 					(*clients_count)--;
+					//decrement_count();
 				}
+				continue;
 			}
 			else if( all_events[i].events & EPOLLOUT )
 			{
@@ -300,11 +323,13 @@ void thread_function(void* arg)
 				else if( read_n == -1 )
 				{
 					// Error in write, client is closed
+					Write(fd_cli_control, file_error, strlen(file_error), &clients[cur_cid]);
+					clean_up_client_structure(&clients[cur_cid]);
+					(*clients_count)--;
 				}
 				else
 				{
 					Write(fd_cli_data, buff, read_n, &clients[cur_cid]);
-					Write(fd_cli_data, "\r\n", 2, &clients[cur_cid]);
 				}
 			}
 			/*
@@ -317,9 +342,8 @@ void thread_function(void* arg)
 
 int main()
 {
-	sigignore(SIGPIPE);
 	signal(SIGINT, sig_term_handler);
-
+	signal(SIGPIPE, sig_pipe_handler);
 	// Set resource limits
 	set_res_limits();
 
@@ -441,13 +465,12 @@ int main()
 	printf("All slaves are registered");
 	printf("\nNow, listening on port 21 for clients\n");
 	// Monitoring thread
-	/*
+	
 	if( pthread_create(&pid, &attr, (void*)monitor, NULL ) != 0 )
         {
         	printf("pthread create error in main");
         	exit(0);
         }
-*/
 	int total_clients_count = 0;
 	int client_sock;
 	while( TRUE )

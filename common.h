@@ -22,7 +22,7 @@
 #include <sys/select.h>
 // ############# Server parameters #############
 
-#define CLIENTS_PER_THREAD 20
+#define CLIENTS_PER_THREAD 4
 #define TOTAL_NO_THREADS 100
 #define MAX_EVENTS (2*CLIENTS_PER_THREAD+1)
 
@@ -143,5 +143,6 @@ void sig_term_handler()
 void sig_pipe_handler()
 {
 	printf("Client terminated because of Pipe termination\n");
+	exit(0);
 }
 #endif
