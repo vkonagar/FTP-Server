@@ -43,7 +43,6 @@ int handle_one_request(struct client_s* client)
 	bzero((void*)&request,sizeof(request));
 	char* command;
 	char* arg;
-	// TODO IMPORTANT
 	int client_sock = client->client_fd;
 	int read_code = read_request(client_sock, &request, client);
 	if( read_code == 0 )
@@ -144,7 +143,7 @@ int handle_one_request(struct client_s* client)
 	return 1;
 }
 
-int add_fds_from_clients_list(fd_set* read_fds, fd_set* write_fds, struct client_s* client, int slave_fd )
+int add_fds_from_clients_list(fd_set* read_fds, struct client_s* client, int slave_fd )
 {
 	int max_fd = slave_fd;
 	int i;
@@ -159,12 +158,12 @@ int add_fds_from_clients_list(fd_set* read_fds, fd_set* write_fds, struct client
 			}
 			FD_SET(client[i].client_fd, read_fds);
 			// This is for writing the file back to the client. Fd's should be write ready!
-			if( client[i].data_fd != 0 )
+			if( client[i].file_fd != 0 )
 			{
 				// Set the fd for write
-				FD_SET(client[i].data_fd, write_fds);
+				FD_SET(client[i].file_fd, read_fds);
 				// Update the max_fd
-				max_fd = ( client[i].data_fd > max_fd ) ? client[i].data_fd : max_fd;
+				max_fd = ( client[i].file_fd > max_fd ) ? client[i].file_fd : max_fd;
 			}
 		}
 	}
@@ -203,8 +202,8 @@ void thread_function(void* arg)
 		tv_struct.tv_sec = 0;
 		tv_struct.tv_usec = 0;
 		// Only control connection fds are set in the fd_set
-		int MAX =  add_fds_from_clients_list(&fds, &write_fds, clients, slave);
-		int res =  select(MAX+1, &fds, &write_fds, NULL, NULL);
+		int MAX =  add_fds_from_clients_list(&fds, clients, slave);
+		int res =  select(MAX+1, &fds, NULL, NULL, NULL);
 		if( res == -1 )
 		{
 			// Error with select call, continue again
@@ -266,7 +265,7 @@ void thread_function(void* arg)
 			int fd_cli_file = clients[i].file_fd;
 			int fd_cli_data = clients[i].data_fd;
 			int fd_cli_control = clients[i].client_fd;
-			if( fd_cli_file != 0 && fd_cli_data!=0 && fd_cli_control!=0 )
+			if( FD_ISSET(fd_cli_file,&fds) )
 			{
 				//printf("Entered IO for %d\n",i);
 				int n;
