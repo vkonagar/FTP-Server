@@ -5,39 +5,18 @@
 #endif
 #include "socket_utilities.h"
 
-
 // These structures are used by all the threads to connect to the master server
 struct sockaddr_in master_server_addr;
 
-// Timeval structure for slaves
-struct timeval tv_struct;
-
 // connected clients count for each thread
-
 int thread_clients_count[TOTAL_NO_THREADS];
-/*
-	Monitoring thread
-*/
-
-void monitor()
-{
-	int i;
-	while( 1 )
-	{
-		sleep(5);
-		for(i=0;i<TOTAL_NO_THREADS;i++)
-		{
-			printf("Thread %d : %d\n",i,thread_clients_count[i]);
-		}
-	}
-}
-
 /*
 	-1 is returned when the request format is wrong
 	1 is returned when the request format is correct
 */
-int handle_one_request(struct client_s* client)
+int handle_one_request(struct client_s* client, int epfd, int client_count,struct epoll_event* one_event)
 {
+	printf(" iam in handle req\n");
 	// Handle the request for the client.
 	ftp_request_t request;
 	bzero((void*)&request,sizeof(request));
@@ -56,10 +35,12 @@ int handle_one_request(struct client_s* client)
 	// get the command and arg from the structure
 	command = request.command;
 	arg = request.arg;
+	printf("Command : %s\n Arg:%s\n",command,arg);
 	// Check if the file is being served by the server to the client. then , don't accept any commands
 	if( strcmp(command,"USER") == 0 )
 	{
 		// USER REQUEST
+		printf("USER\n");
 		Write(client_sock, allow_user, strlen(allow_user), client);
 	}
 	else if( strcmp(command,"SYST") == 0 )
@@ -133,6 +114,21 @@ int handle_one_request(struct client_s* client)
 			// Connection established
 			printf("Connection established from server to client\n");
 			client->data_fd = data_sock;
+			// Set the event
+			
+			// Add this client data con to the epollfd.
+			one_event->data.fd = client_count*(-1) ; /* return the data to us later */
+			one_event->events = EPOLLOUT;
+			
+			// Set this fd for writing
+			int ret = epoll_ctl (epfd, EPOLL_CTL_ADD, data_sock, one_event);
+			if (ret)
+			{
+				perror ("epoll_ctl");
+				// TODO ERROR
+				printf("ERROR iN ADDING THE DATA FD\n");
+				return -1;
+			}
 		}
 	}
 	else
@@ -143,35 +139,13 @@ int handle_one_request(struct client_s* client)
 	return 1;
 }
 
-int add_fds_from_clients_list(fd_set* read_fds, struct client_s* client, int slave_fd )
-{
-	int max_fd = slave_fd;
-	int i;
-	for(i=0;i<CLIENTS_PER_THREAD;i++)
-	{
-		if( client[i].client_fd != 0 )
-		{
-			if( client[i].client_fd > slave_fd )
-			{
-				// Update the max fd
-				max_fd = client[i].client_fd;
-			}
-			FD_SET(client[i].client_fd, read_fds);
-			// This is for writing the file back to the client. Fd's should be write ready!
-			if( client[i].file_fd != 0 )
-			{
-				// Set the fd for write
-				FD_SET(client[i].file_fd, read_fds);
-				// Update the max_fd
-				max_fd = ( client[i].file_fd > max_fd ) ? client[i].file_fd : max_fd;
-			}
-		}
-	}
-	return max_fd;
-}
-
 void thread_function(void* arg)
 {
+	
+	// One event is used as a placeholder to add a new event
+	struct epoll_event one_event;
+	
+	// Thread no given by main thread
 	int thread_no = (int)arg;
 	// Create structures for the clients
 	struct client_s clients[CLIENTS_PER_THREAD];
@@ -188,42 +162,72 @@ void thread_function(void* arg)
 	// Connected to master server
 	// Do fd stuff now
 	printf("Connected to master\n");
-	fd_set fds;
-	fd_set write_fds;
-	int i;
+	
+	// Serve the clients now!!!!!!
+	int i,ret,nr_events;
 	char buff[BUFF_SIZE];
+	// Create an epoll fd, should be closed with close system call
+	int epfd = epoll_create1(0);
+	if( epfd < 0 )
+	{
+		perror("ERROR IN EPOLL IN A THREAD");
+		pthread_exit(0);
+	}
+	// Create epoll events array. We need at max CLIENTS_PER_THREAD for client_control fds, CLIENTS_PER_THREAD for client
+	// data fds and 1 for slave fd, in the case where all are active.
+	// All the returned events are stored here.
+	struct epoll_event *all_events;
+	all_events = (struct epoll_event*) calloc (MAX_EVENTS, sizeof (struct epoll_event));
+	if (!all_events)
+	{
+	        perror ("malloc");
+		pthread_exit(0);
+	}
+	/* add the slave to the epollfd for reading */
+	one_event.events = EPOLLIN;
+	one_event.data.fd = slave;
+
+	// Set this fd for reading
+	ret = epoll_ctl (epfd, EPOLL_CTL_ADD, slave, &one_event);
+	if (ret)
+	{
+		perror ("epoll_ctl");
+		pthread_exit(0);
+	}
+	/* 
+		Event loop
+	*/
 	while( TRUE )
 	{
-		FD_ZERO(&fds);
-		FD_ZERO(&write_fds);
-		// Set the slave fd to read in new clients
-		FD_SET(slave, &fds); 
-		// Set all the existing clients
-		tv_struct.tv_sec = 0;
-		tv_struct.tv_usec = 0;
-		// Only control connection fds are set in the fd_set
-		int MAX =  add_fds_from_clients_list(&fds, clients, slave);
-		int res =  select(MAX+1, &fds, NULL, NULL, NULL);
-		if( res == -1 )
+		/*
+			epoll system call with Level triggered mode enabled 
+			Add all the client_fds, data_fds, and slave
+			-1 as timeout will block untill some of them are ready.
+		*/
+		nr_events = epoll_wait (epfd, all_events, MAX_EVENTS, -1);
+		if (nr_events < 0)
 		{
-			// Error with select call, continue again
-			printf("ERROR: Select in thread %d\n",thread_no);
+		        perror ("epoll_wait");
 			continue;
 		}
-		else if( res == 0 )
+		// poll_wait returned correctly
+		// Now check the events
+		for( i=0; i<nr_events; i++)
 		{
-			// No descriptors are set
-		}
-		else if( res > 0 )
-		{
-			//printf("Some set\n");
-			// Some descriptors are set.
-			// Check if any new clients came
-			if( FD_ISSET(slave, &fds) )
+			// Check for errors
+			if( (all_events[i].events & EPOLLERR) || (all_events[i].events & EPOLLHUP) )
 			{
+				// Error in this fd
+				printf("ERROR IN THE FD\n");
+				close(all_events[i].data.fd);
+				continue;
+			}
+			
+			// Check if master has got something
+			if( all_events[i].data.fd == slave )
+			{
+				// Master has got something.
 				printf("Master has got something for me\n");
-				// Read all the FD's given by the master to this thread
-
 				struct client_s* cli = &clients[*clients_count];
 				int read_desc = read_descriptor(slave,cli); 
 				cli->client_fd = read_desc;
@@ -231,63 +235,81 @@ void thread_function(void* arg)
 				cli->data_fd = 0;
 				bzero( (void*)&(cli->act_mode_client_addr), sizeof(cli->act_mode_client_addr) );
 				// Send a greeting
-				Write(cli->client_fd, greeting, strlen(greeting), cli);
-				(*clients_count)++;
-				//printf("Added a new client in thread %d\n",thread_no);
-				// Clear this descriptor, so that ir wont be read again in this iteration of select.
-				FD_CLR(slave, &fds);
-			}	
-			// Now serve the requests and files to the clients
-			// Clients not having the data_fd as 0, will be served for the files, otherwise will be served for the requests.
-			// Go to each client fd and check if it is set
-			for(i=0;i<CLIENTS_PER_THREAD;i++)
-			{
-				if( clients[i].client_fd == 0 )
+				Write(cli->client_fd, greeting, strlen(greeting), cli);	
+				
+				// Add this client to the epollfd.
+				// Negate the descriptor and store, so that it won't clash with the slave desc
+				printf("Adding %d as %d\n",read_desc,read_desc*-1);
+				one_event.data.fd = *clients_count*(-1) ; /* return the data to us later */
+				one_event.events = EPOLLIN;
+				
+				// Set this fd for reading
+				ret = epoll_ctl (epfd, EPOLL_CTL_ADD, read_desc, &one_event);
+				if (ret)
 				{
-					// Client not active
+					perror ("epoll_ctl");
+					// TODO ERROR
 					continue;
 				}
-				if( FD_ISSET(clients[i].client_fd,&fds) )
+				// Clients increased
+				(*clients_count)++;
+				if(*clients_count == CLIENTS_PER_THREAD)
 				{
-					// Its set, so serve this client for one request
-					if( handle_one_request(&clients[i]) == -1 )
-					{
-						// Some error in the commands. Quit the connection
-						clean_up_client_structure(&clients[i]);
-						(*clients_count)--;
-					}
+					// Master gave all the clients.
+					close(slave);
+				}
+				printf("Client count : %d\n",*clients_count);
+				continue;
+			}
+
+			/*
+				Convert the stored negative desc to positive on the event structure back to an integer for referencing the client
+			*/
+			int cur_cid = (all_events[i].data.fd)*(-1);
+			// Check if clients control fds are ready for reading
+			// if this fd is not slave and is for reading, then its client control connection fd
+			if( all_events[i].events & EPOLLIN )
+			{
+				// This is client no cur_cid and its a client control descriptor ready for the read
+				// Serve the request.
+				if( handle_one_request(&clients[cur_cid], epfd, cur_cid, &one_event) == -1 )
+				{
+					printf("Some error in Command\n CLEAN UP\n");
+					// Some error in the commands. Quit the connection
+					clean_up_client_structure(&clients[cur_cid]);
+					(*clients_count)--;
 				}
 			}
-		}
-		// Now do the pending file IO
-		for(i=0;i<CLIENTS_PER_THREAD;i++)
-		{
-			int fd_cli_file = clients[i].file_fd;
-			int fd_cli_data = clients[i].data_fd;
-			int fd_cli_control = clients[i].client_fd;
-			if( FD_ISSET(fd_cli_file,&fds) )
+			else if( all_events[i].events & EPOLLOUT )
 			{
-				//printf("Entered IO for %d\n",i);
-				int n;
+				// This is client number cur_cid and its client data desc ready for write
+				int fd_cli_file = clients[cur_cid].file_fd;
+			        int fd_cli_data = clients[cur_cid].data_fd;
+				int fd_cli_control = clients[cur_cid].client_fd;
+				int read_n;
 				//File opened, so write one block of data.
-				if( ( n = Read(fd_cli_file, buff, BUFF_SIZE, &clients[i])) == 0 )
+				if( ( read_n = Read(fd_cli_file, buff, BUFF_SIZE, &clients[cur_cid])) == 0 )
 				{
 					// File is completely read, so close all of the descriptors
 					// Clean up the entries on the structure, so that this is not used again
-					Write(fd_cli_data, "\r\n", 2, &clients[i]);
-					Write(fd_cli_control, file_done, strlen(file_done), &clients[i]);
-					clean_up_client_structure(&clients[i]);
+					Write(fd_cli_control, file_done, strlen(file_done), &clients[cur_cid]);
+					clean_up_client_structure(&clients[cur_cid]);
+					printf("Done\n");
 					(*clients_count)--;
 				}
-				else if( n == -1 )
+				else if( read_n == -1 )
 				{
 					// Error in write, client is closed
 				}
 				else
 				{
-					Write(fd_cli_data, buff, n, &clients[i]);
+					Write(fd_cli_data, buff, read_n, &clients[cur_cid]);
+					Write(fd_cli_data, "\r\n", 2, &clients[cur_cid]);
 				}
 			}
+			/*
+				End of the event loop
+			*/
 		}
 	}
 }
@@ -418,16 +440,14 @@ int main()
 	}
 	printf("All slaves are registered");
 	printf("\nNow, listening on port 21 for clients\n");
-	// Step 6
-	
 	// Monitoring thread
-	
+	/*
 	if( pthread_create(&pid, &attr, (void*)monitor, NULL ) != 0 )
         {
         	printf("pthread create error in main");
         	exit(0);
         }
-
+*/
 	int total_clients_count = 0;
 	int client_sock;
 	while( TRUE )

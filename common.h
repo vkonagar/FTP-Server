@@ -2,6 +2,7 @@
 #define COMMON_HEADERS
 
 // General
+#include <limits.h>
 #include <sys/resource.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,7 @@
 #include <pthread.h>
 #include <assert.h>
 // Networking
+#include <sys/epoll.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -22,6 +24,7 @@
 
 #define CLIENTS_PER_THREAD 20
 #define TOTAL_NO_THREADS 100
+#define MAX_EVENTS (2*CLIENTS_PER_THREAD+1)
 
 // #############################################
 
@@ -38,7 +41,6 @@
 #define REQ_ARG_LENGTH 40
 #define BUFF_SIZE 1024
 #define FILE_NAME_LEN 20
-#define MAX_OPEN_DESC_CLIENT 4
 
 int threads_active = 0;
 pthread_mutex_t mutex;
@@ -56,6 +58,7 @@ struct client_s
 	int data_fd;
 	int file_fd;
 	struct sockaddr_in act_mode_client_addr;
+	struct epoll_event* event;
 };
 
 
