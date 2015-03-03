@@ -23,7 +23,7 @@
 // ############# Server parameters #############
 
 #define CLIENTS_PER_THREAD 4
-#define TOTAL_NO_THREADS 100
+#define TOTAL_NO_THREADS 1250
 #define MAX_EVENTS (2*CLIENTS_PER_THREAD+1)
 
 // #############################################
