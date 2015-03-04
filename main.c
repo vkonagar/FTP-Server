@@ -20,6 +20,32 @@ void monitor()
 
 // connected clients count for each thread
 int thread_clients_count[TOTAL_NO_THREADS];
+
+
+void set_sched_param()
+{
+
+	struct sched_param sp;
+	int policy;
+	if( pthread_getschedparam(pthread_self(), &policy, &sp) < 0 )
+	{
+		printf("Error getting the sched params\n");
+		exit(0);
+	}
+	// Check the default sheduling policy.
+	if( policy == SCHED_OTHER )
+	{
+		printf("Its SCHED_OTHER by default and priority is 0\n");
+	}
+	// Assign the RR scheduler and a high priority
+	sp.sched_priority = THREAD_PRIORITY_HIGH;
+	if( pthread_setschedparam(pthread_self(), SCHED_RR, &sp) < 0 )
+	{
+		printf("Error in setting the thread priority in main\n");
+	}
+	printf("Thread priority set to high and Round Robin in main\n");
+}
+
 /*
 	-1 is returned when the request format is wrong
 	1 is returned when the request format is correct
@@ -27,7 +53,6 @@ int thread_clients_count[TOTAL_NO_THREADS];
 int handle_one_request(struct client_s* client, int epfd, int client_count,struct epoll_event* one_event)
 {
 	int ret;
-	printf(" iam in handle req\n");
 	// Handle the request for the client.
 	ftp_request_t request;
 	bzero((void*)&request,sizeof(request));
@@ -39,6 +64,7 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 	{
 		// Bad request format
 		printf("Bad request format\n");
+		printf("\n\n\nCommand : %s\n, arg %s\n\n\n",command,arg);
 		Write(client_sock, error, strlen(error), client);
 		// Close and clean up
 		return -1;
@@ -46,12 +72,10 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 	// get the command and arg from the structure
 	command = request.command;
 	arg = request.arg;
-	printf("Command : %s\n Arg:%s\n",command,arg);
 	// Check if the file is being served by the server to the client. then , don't accept any commands
 	if( strcmp(command,"USER") == 0 )
 	{
 		// USER REQUEST
-		printf("USER\n");
 		Write(client_sock, allow_user, strlen(allow_user), client);
 	}
 	else if( strcmp(command,"SYST") == 0 )
@@ -128,19 +152,18 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 			// Set the event
 			
 			// Add this client data con to the epollfd.
-			one_event->data.fd = client_count*(-1) ; /* return the data to us later */
+			one_event->data.fd = client_count*(-1); /* return the data to us later */
 			one_event->events = EPOLLOUT;
 			
 			// Set this fd for writing
-			ret = epoll_ctl (epfd, EPOLL_CTL_ADD, data_sock, one_event);
+			ret = epoll_ctl(epfd, EPOLL_CTL_ADD, data_sock, one_event);
 			if (ret)
 			{
 				perror ("epoll_ctl");
-				// TODO ERROR
 				printf("ERROR iN ADDING THE DATA FD\n");
 				return -1;
 			}
-			// Now dont look for an event of the client fd until this file is tranferred.
+			/*// Now dont look for an event of the client fd until this file is tranferred.
 			ret = epoll_ctl (epfd, EPOLL_CTL_DEL, client_sock, one_event);
 			if (ret)
 			{
@@ -148,8 +171,8 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 				// TODO ERROR
 				printf("ERROR iN ADDING THE DATA FD\n");
 				return -1;
-			}
-			increment_thread_count();
+			}*/
+			printf("Client added\n");
 		}
 	}
 	else
@@ -161,15 +184,17 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 }
 
 void thread_function(void* arg)
-{
-	
+{	
 	// One event is used as a placeholder to add a new event
 	struct epoll_event one_event;
 	
 	// Thread no given by main thread
 	int thread_no = (int)arg;
+
 	// Create structures for the clients
 	struct client_s clients[CLIENTS_PER_THREAD];
+	
+	// This is the count for the clients of this thread
 	int* clients_count = &thread_clients_count[thread_no];
 
 	// Connect to the master thread
@@ -181,7 +206,6 @@ void thread_function(void* arg)
 		pthread_exit(0);
 	}
 	// Connected to master server
-	// Do fd stuff now
 	printf("Connected to master\n");
 	
 	// Serve the clients now!!!!!!
@@ -192,8 +216,10 @@ void thread_function(void* arg)
 	if( epfd < 0 )
 	{
 		perror("ERROR IN EPOLL IN A THREAD");
+		close(slave);
 		pthread_exit(0);
 	}
+
 	// Create epoll events array. We need at max CLIENTS_PER_THREAD for client_control fds, CLIENTS_PER_THREAD for client
 	// data fds and 1 for slave fd, in the case where all are active.
 	// All the returned events are stored here.
@@ -202,17 +228,23 @@ void thread_function(void* arg)
 	if (!all_events)
 	{
 	        perror ("malloc");
+		// Free and close all fds of this thread.
+		free(all_events);
+		close(epfd);
+		close(slave);
 		pthread_exit(0);
 	}
 	/* add the slave to the epollfd for reading */
 	one_event.events = EPOLLIN;
 	one_event.data.fd = slave;
-
 	// Set this fd for reading
-	ret = epoll_ctl (epfd, EPOLL_CTL_ADD, slave, &one_event);
+	ret = epoll_ctl(epfd, EPOLL_CTL_ADD, slave, &one_event);
 	if (ret)
 	{
 		perror ("epoll_ctl");
+		free(all_events);
+		close(epfd);
+		close(slave);
 		pthread_exit(0);
 	}
 	/* 
@@ -243,7 +275,15 @@ void thread_function(void* arg)
 				// Check if it is slave, then kill the thread.
 				if( all_events[i].data.fd == slave )
 				{
-					pthread_exit(0);
+					printf("ERROR : Error in the master socket\n");
+					close(slave);
+					// If there are no clients, then kill this thread
+					if( *clients_count == 0 )
+					{
+						close(epfd);
+						free(all_events);
+						pthread_exit(0);
+					}
 				}
 				else
 				{
@@ -255,7 +295,7 @@ void thread_function(void* arg)
 			}
 			
 			// Check if master has got something
-			if( all_events[i].data.fd == slave )
+			if( all_events[i].data.fd > 0 && all_events[i].data.fd == slave )
 			{
 				// Master has got something.
 				printf("Master has got something for me\n");
@@ -265,57 +305,60 @@ void thread_function(void* arg)
 				cli->file_fd = 0;
 				cli->data_fd = 0;
 				bzero( (void*)&(cli->act_mode_client_addr), sizeof(cli->act_mode_client_addr) );
-				// Send a greeting
-				Write(cli->client_fd, greeting, strlen(greeting), cli);	
 				
 				// Add this client to the epollfd.
 				// Negate the descriptor and store, so that it won't clash with the slave desc
 				printf("Adding %d as %d\n",read_desc,read_desc*-1);
-				one_event.data.fd = *clients_count*(-1) ; /* return the data to us later */
+				one_event.data.fd = (*clients_count)*(-1) ; /* return the data to us later */
 				one_event.events = EPOLLIN;
-				
 				// Set this fd for reading
-				ret = epoll_ctl (epfd, EPOLL_CTL_ADD, read_desc, &one_event);
+				ret = epoll_ctl (epfd, EPOLL_CTL_ADD, cli->client_fd, &one_event);
 				if (ret)
 				{
 					perror ("epoll_ctl");
-					// TODO ERROR
+					printf("Unable to add fd to events\n");
+					clean_up_client_structure(cli);
 					continue;
 				}
+				// Everything is perfect now
+				// Send a greeting
+				Write(cli->client_fd, greeting, strlen(greeting), cli);	
 				// Clients increased
 				(*clients_count)++;
+				increment_thread_count();
+				printf("THREAD %d Clients count : %d \n",thread_no,*clients_count);
 				if(*clients_count == CLIENTS_PER_THREAD)
 				{
 					// Master gave all the clients.
 					close(slave);
 				}
-				printf("Client count : %d\n",*clients_count);
+				// Go to the next iteration.
 				continue;
 			}
 
+			// This current event is by client fd not master.
 			/*
 				Convert the stored negative desc to positive on the event structure back to an integer for referencing the client
 			*/
 			int cur_cid = (all_events[i].data.fd)*(-1);
+			assert(cur_cid>=0);
 			// Check if clients control fds are ready for reading
 			// if this fd is not slave and is for reading, then its client control connection fd
 			if( all_events[i].events & EPOLLIN )
 			{
-				// This is client no cur_cid and its a client control descriptor ready for the read
 				// Serve the request.
 				if( handle_one_request(&clients[cur_cid], epfd, cur_cid, &one_event) == -1 )
 				{
-					printf("Some error in Command\n CLEAN UP\n");
+					printf("ERROR: Some error inthe command\n");
 					// Some error in the commands. Quit the connection
 					clean_up_client_structure(&clients[cur_cid]);
 					(*clients_count)--;
-					//decrement_count();
 				}
-				continue;
 			}
 			else if( all_events[i].events & EPOLLOUT )
 			{
-				// This is client number cur_cid and its client data desc ready for write
+				// Serve the FILE
+				printf("FILE IO DOING\n\n");
 				int fd_cli_file = clients[cur_cid].file_fd;
 			        int fd_cli_data = clients[cur_cid].data_fd;
 				int fd_cli_control = clients[cur_cid].client_fd;
@@ -349,42 +392,21 @@ void thread_function(void* arg)
 	}
 }
 
-
 int main()
 {
-	signal(SIGINT, sig_term_handler);
-	signal(SIGPIPE, sig_pipe_handler);
-	// Set resource limits
-	set_res_limits();
-
-	// Get the default thread priority
-	struct sched_param sp;
-	int policy;
-	if( pthread_getschedparam(pthread_self(), &policy, &sp) < 0 )
-	{
-		printf("Error getting the sched params\n");
-		exit(0);
-	}
-	// Check the default sheduling policy.
-	if( policy == SCHED_OTHER )
-	{
-		printf("Its SCHED_OTHER by default and priority is 0\n");
-	}
-	// Assign the RR scheduler and a high priority
-	sp.sched_priority = THREAD_PRIORITY_HIGH;
-	if( pthread_setschedparam(pthread_self(), SCHED_RR, &sp) < 0 )
-	{
-		printf("Error in setting the thread priority in main\n");
-	}
-	printf("Thread priority set to high and Round Robin in main\n");
-
 	// Change the current working directory to the FILES folder.
 	if( chdir("../FTP_FILES") == -1 )
 	{
 		perror("CWD");
 		exit(0);
 	}
-
+	// Register the signal handlers
+	signal(SIGINT, sig_term_handler);
+	signal(SIGPIPE, sig_pipe_handler);
+	// Set resource limits
+	set_res_limits();
+	// Get and set the default thread priority
+	//set_sched_param();
 	// This is the listen socket on 21
 	int listen_sock = Socket(AF_INET, SOCK_STREAM, 0);
 	struct sockaddr_in server_addr;
@@ -393,13 +415,13 @@ int main()
 	server_addr.sin_addr.s_addr = htons(INADDR_ANY);
 	Bind(listen_sock, (struct sockaddr*)&server_addr, sizeof(server_addr));
 	Listen(listen_sock, BACKLOG);
-	printf("FTP SERVER STARTED\n");
+	
 
-
-	// thread id
+	// Threads
 	pthread_t pid;
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
+	struct sched_param sp;
 	// Set stack size to 1 MB
  	if( pthread_attr_setstacksize(&attr,1024*1024) < 0 )
 	{
@@ -408,7 +430,7 @@ int main()
 	}
 	printf("Stack size set to 512 KB\n");
 	// Set the inherit sheduling attr
-	if( pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED) < 0 )
+	/*if( pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED) < 0 )
 	{
 		printf("Error in set the inherit sheduling attr from main\n");
 	}
@@ -421,7 +443,7 @@ int main()
 	if( pthread_attr_setschedparam(&attr, &sp) < 0 )
 	{
 		printf("Error in setting hte priority of the children\n");
-	}
+	}*/
 	
 	/*
 	  ALGORITHM
@@ -485,26 +507,33 @@ int main()
         }
 	int total_clients_count = 0;
 	int client_sock;
+	int index;
+
+	/*
+		Accept the clients on this thread
+	*/
 	while( TRUE )
 	{
 		client_sock = Accept(listen_sock,NULL, NULL);
-		
-		if( total_clients_count >= CLIENTS_PER_THREAD*TOTAL_NO_THREADS )
+		if( total_clients_count > CLIENTS_PER_THREAD*TOTAL_NO_THREADS )
 		{
+			// Refuse the connections
 			close(client_sock);
 			continue;
 		}
 		if( client_sock == -1 )
 		{
-			printf("Error in accepting the client\n");
+			printf("ERROR in accepting the client\n");
 			continue;
 		}
+
 		// Got a client.
-		printf("Clients count : %d\n",total_clients_count);
-		int index = total_clients_count/CLIENTS_PER_THREAD;
+		//printf("Clients count : %d\n",total_clients_count);
+		index = total_clients_count/CLIENTS_PER_THREAD;
 		// Send to the FD present on the slave array at this index
 		Write(slave_fd_array[index], (char*)&client_sock, FD_SIZE, NULL);
 		printf("Written a new client:%d to %d thread\n",client_sock,index);
 		total_clients_count++;
 	}
 }
+

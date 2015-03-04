@@ -61,19 +61,20 @@ int clean_up_client_structure(struct client_s* client)
 	if( client->client_fd != 0 )
 	{
 		Write(client->client_fd, close_con, strlen(close_con), client);
-		//close(client->client_fd);
+		close(client->client_fd);
 	}
 	if( client->data_fd != 0 )
 	{
-		//close(client->data_fd);
+		close(client->data_fd);
 	}
 	if( client->file_fd != 0 )
 	{
-		//close(client->file_fd);
+		close(client->file_fd);
 	}
-	//client->client_fd = 0;
-	//client->data_fd = 0;
-	//client->file_fd = 0;
+	client->client_fd = 0;
+	client->data_fd = 0;
+	client->file_fd = 0;
+	decrement_thread_count();
 }
 
 

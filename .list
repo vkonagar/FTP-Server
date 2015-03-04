@@ -1,0 +1,8 @@
+total 64
+-rwxr-xr-x 1 root   root    2288 Mar  3 21:51 common.h
+-rwxr-xr-x 1 root   root   24545 Mar  3 22:26 ftp_server
+-rwxr-xr-x 1 root   root   15215 Mar  3 22:26 main.c
+-rwxrwxr-x 1 vamshi vamshi    80 Feb 25 22:48 makefile
+-rwxrwxr-x 1 vamshi vamshi  1751 Mar  2 02:31 protocol.h
+-rwxr-xr-x 1 root   root     664 Mar  2 02:27 README.md
+-rwxrwxr-x 1 vamshi vamshi  4136 Mar  3 21:52 socket_utilities.h

@@ -23,7 +23,7 @@
 // ############# Server parameters #############
 
 #define CLIENTS_PER_THREAD 100
-#define TOTAL_NO_THREADS 2
+#define TOTAL_NO_THREADS 1
 #define MAX_EVENTS (2*CLIENTS_PER_THREAD+1)
 
 // #############################################
@@ -58,7 +58,6 @@ struct client_s
 	int data_fd;
 	int file_fd;
 	struct sockaddr_in act_mode_client_addr;
-	struct epoll_event* event;
 };
 
 
@@ -100,26 +99,6 @@ void set_res_limits()
 	}
 	printf("Prioirty limit set to 100\n");
 }
-
-
-void clean_all_fds(int fd[],int count)
-{
-	int i;
-	for(i=0;i<count;i++)
-	{
-		close(fd[i]);
-	}
-}
-
-int monitoring_thread()
-{
-	while(1)
-	{
-		sleep(5);
-		printf("Current threads: %d\n",threads_active);
-	}
-}
-
 
 int read_descriptor(int slave, struct client_s* client)
 {
