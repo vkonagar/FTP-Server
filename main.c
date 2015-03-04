@@ -240,7 +240,17 @@ void thread_function(void* arg)
 			{
 				// Error in this fd
 				printf("ERROR IN THE FD\n");
-				close(all_events[i].data.fd);
+				// Check if it is slave, then kill the thread.
+				if( all_events[i].data.fd == slave )
+				{
+					pthread_exit(0);
+				}
+				else
+				{
+					// Its a client fd
+					int temp_cid = (all_events[i].data.fd)*(-1);
+					clean_up_client_structure(&clients[temp_cid]);
+				}
 				continue;
 			}
 			
@@ -391,7 +401,7 @@ int main()
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
 	// Set stack size to 1 MB
- 	if( pthread_attr_setstacksize(&attr,512*1024) < 0 )
+ 	if( pthread_attr_setstacksize(&attr,1024*1024) < 0 )
 	{
 		printf("Stack size set error");
 		exit(0);
@@ -444,7 +454,8 @@ int main()
 	{
 		if( pthread_create(&pid, &attr, (void*)thread_function, (void*)i ) != 0 )
         	{
-        		printf("pthread create error in main");
+			perror("create thread");
+        		printf("pthread create error in main\n");
         		exit(0);
         	}
 	}
@@ -461,6 +472,7 @@ int main()
 			exit(0);
 		}
 		slave_fd_array[i] = slave_temp;
+		printf("%d \n",i);
 	}
 	printf("All slaves are registered");
 	printf("\nNow, listening on port 21 for clients\n");
