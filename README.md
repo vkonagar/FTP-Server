@@ -1,6 +1,7 @@
 # IO-Multiplexed-threaded-FTP-server
-Implementation of a FTP server, which is multiplexed and can handle many clients at a time for basic file fetching.
-
+* Implementation of a FTP server, which is multiplexed and can handle many clients at a time for basic file fetching.
+* It is better than conventional FTP servers like vsftpd on the linux OS for testing the scalablility of the FTP server or any middleboxed like NAT's between the clients and FTP server. 
+* vsftpd spawns a process per client, which has significant overhead for scheduling and memory. This architecture will eliminate this overhead by pre-spawning a predefined no of thread workers and main thread load balancing the clients to the workers.
 ### Architecture
 * Rather than using one thread per client, i used one thread for many clients ( say 200 ). This will reduce the scheduling overhead on the OS.
 * Main thread will accept the clients on the FTP socket 21. After it accepts an fd, it redirects that fd to a thread accordingly.
