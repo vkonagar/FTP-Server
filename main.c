@@ -52,6 +52,8 @@ void set_sched_param()
 */
 int handle_one_request(struct client_s* client, int epfd, int client_count,struct epoll_event* one_event)
 {
+	
+
 	int ret;
 	// Handle the request for the client.
 	ftp_request_t request;
@@ -64,7 +66,6 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 	{
 		// Bad request format
 		printf("Bad request format\n");
-		printf("\n\n\nCommand : %s\n, arg %s\n\n\n",command,arg);
 		Write(client_sock, error, strlen(error), client);
 		// Close and clean up
 		return -1;
@@ -73,6 +74,7 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 	command = request.command;
 	arg = request.arg;
 	// Check if the file is being served by the server to the client. then , don't accept any commands
+	printf("Command %s\nARg:%s\n",command,arg);
 	if( strcmp(command,"USER") == 0 )
 	{
 		// USER REQUEST
@@ -152,7 +154,7 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 			// Set the event
 			
 			// Add this client data con to the epollfd.
-			one_event->data.fd = client_count*(-1); /* return the data to us later */
+			one_event->data.fd = client_count; /* return the data to us later */
 			one_event->events = EPOLLOUT;
 			
 			// Set this fd for writing
@@ -163,7 +165,7 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 				printf("ERROR iN ADDING THE DATA FD\n");
 				return -1;
 			}
-			/*// Now dont look for an event of the client fd until this file is tranferred.
+			// Now dont look for an event of the client fd until this file is tranferred.
 			ret = epoll_ctl (epfd, EPOLL_CTL_DEL, client_sock, one_event);
 			if (ret)
 			{
@@ -171,7 +173,7 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 				// TODO ERROR
 				printf("ERROR iN ADDING THE DATA FD\n");
 				return -1;
-			}*/
+			}
 			printf("Client added\n");
 		}
 	}
@@ -212,7 +214,7 @@ void thread_function(void* arg)
 	int i,ret,nr_events;
 	char buff[BUFF_SIZE];
 	// Create an epoll fd, should be closed with close system call
-	int epfd = epoll_create1(0);
+	int epfd = epoll_create(MAX_EVENTS);
 	if( epfd < 0 )
 	{
 		perror("ERROR IN EPOLL IN A THREAD");
@@ -236,7 +238,9 @@ void thread_function(void* arg)
 	}
 	/* add the slave to the epollfd for reading */
 	one_event.events = EPOLLIN;
-	one_event.data.fd = slave;
+
+	// Give -1 as slave id
+	one_event.data.fd = -1;
 	// Set this fd for reading
 	ret = epoll_ctl(epfd, EPOLL_CTL_ADD, slave, &one_event);
 	if (ret)
@@ -273,7 +277,7 @@ void thread_function(void* arg)
 				// Error in this fd
 				printf("ERROR IN THE FD\n");
 				// Check if it is slave, then kill the thread.
-				if( all_events[i].data.fd == slave )
+				if( all_events[i].data.fd == -1 )
 				{
 					printf("ERROR : Error in the master socket\n");
 					close(slave);
@@ -288,15 +292,17 @@ void thread_function(void* arg)
 				else
 				{
 					// Its a client fd
-					int temp_cid = (all_events[i].data.fd)*(-1);
+					int temp_cid = (all_events[i].data.fd);
 					clean_up_client_structure(&clients[temp_cid]);
 				}
 				continue;
 			}
 			
 			// Check if master has got something
-			if( all_events[i].data.fd > 0 && all_events[i].data.fd == slave )
+			// -1 is for slave
+			if( all_events[i].data.fd == -1 )
 			{
+				printf("I AM A SLAVE\n");
 				// Master has got something.
 				printf("Master has got something for me\n");
 				struct client_s* cli = &clients[*clients_count];
@@ -308,8 +314,7 @@ void thread_function(void* arg)
 				
 				// Add this client to the epollfd.
 				// Negate the descriptor and store, so that it won't clash with the slave desc
-				printf("Adding %d as %d\n",read_desc,read_desc*-1);
-				one_event.data.fd = (*clients_count)*(-1) ; /* return the data to us later */
+				one_event.data.fd = (*clients_count); /* return the data to us later */
 				one_event.events = EPOLLIN;
 				// Set this fd for reading
 				ret = epoll_ctl (epfd, EPOLL_CTL_ADD, cli->client_fd, &one_event);
@@ -327,11 +332,6 @@ void thread_function(void* arg)
 				(*clients_count)++;
 				increment_thread_count();
 				printf("THREAD %d Clients count : %d \n",thread_no,*clients_count);
-				if(*clients_count == CLIENTS_PER_THREAD)
-				{
-					// Master gave all the clients.
-					close(slave);
-				}
 				// Go to the next iteration.
 				continue;
 			}
@@ -340,8 +340,7 @@ void thread_function(void* arg)
 			/*
 				Convert the stored negative desc to positive on the event structure back to an integer for referencing the client
 			*/
-			int cur_cid = (all_events[i].data.fd)*(-1);
-			assert(cur_cid>=0);
+			int cur_cid = (all_events[i].data.fd);
 			// Check if clients control fds are ready for reading
 			// if this fd is not slave and is for reading, then its client control connection fd
 			if( all_events[i].events & EPOLLIN )
@@ -352,13 +351,11 @@ void thread_function(void* arg)
 					printf("ERROR: Some error inthe command\n");
 					// Some error in the commands. Quit the connection
 					clean_up_client_structure(&clients[cur_cid]);
-					(*clients_count)--;
 				}
 			}
 			else if( all_events[i].events & EPOLLOUT )
 			{
 				// Serve the FILE
-				printf("FILE IO DOING\n\n");
 				int fd_cli_file = clients[cur_cid].file_fd;
 			        int fd_cli_data = clients[cur_cid].data_fd;
 				int fd_cli_control = clients[cur_cid].client_fd;
@@ -371,14 +368,12 @@ void thread_function(void* arg)
 					Write(fd_cli_control, file_done, strlen(file_done), &clients[cur_cid]);
 					clean_up_client_structure(&clients[cur_cid]);
 					printf("Done\n");
-					(*clients_count)--;
 				}
 				else if( read_n == -1 )
 				{
 					// Error in write, client is closed
 					Write(fd_cli_control, file_error, strlen(file_error), &clients[cur_cid]);
 					clean_up_client_structure(&clients[cur_cid]);
-					(*clients_count)--;
 				}
 				else
 				{
