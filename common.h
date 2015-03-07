@@ -23,7 +23,7 @@
 // ############# Server parameters #############
 
 #define CLIENTS_PER_THREAD 200
-#define TOTAL_NO_THREADS 10
+#define TOTAL_NO_THREADS 100
 #define MAX_EVENTS (2*CLIENTS_PER_THREAD+1)
 
 // #############################################
@@ -82,10 +82,10 @@ void decrement_thread_count()
 
 void set_res_limits()
 {
-	// Set MAX FD's to 50000
+	// Set MAX FD's to 100000
 	struct rlimit res;
-	res.rlim_cur = 50000;
-	res.rlim_max = 50000;
+	res.rlim_cur = 100000;
+	res.rlim_max = 100000;
 	if( setrlimit(RLIMIT_NOFILE, &res) == -1 )
 	{
 		perror("Resource FD limit");

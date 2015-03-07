@@ -9,11 +9,13 @@
 struct sockaddr_in master_server_addr;
 
 
+int total_clients_count = 0;
+
 void monitor()
 {
 	while(1)
 	{
-		printf("Count : %d\n",threads_active);
+		printf("Count : %d\n",total_clients_count);
 		sleep(2);
 	}
 }
@@ -74,7 +76,7 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 	command = request.command;
 	arg = request.arg;
 	// Check if the file is being served by the server to the client. then , don't accept any commands
-	printf("Command %s\nARg:%s\n",command,arg);
+	// printf("Command %s\nARg:%s\n",command,arg);
 	if( strcmp(command,"USER") == 0 )
 	{
 		// USER REQUEST
@@ -149,7 +151,7 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 		else
 		{
 			// Connection established
-			printf("Connection established from server to client\n");
+			// printf("Connection established from server to client\n");
 			client->data_fd = data_sock;
 			// Set the event
 			
@@ -170,11 +172,10 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 			if (ret)
 			{
 				perror ("epoll_ctl");
-				// TODO ERROR
 				printf("ERROR iN ADDING THE DATA FD\n");
 				return -1;
 			}
-			printf("Client added\n");
+		//	printf("Client added\n");
 		}
 	}
 	else
@@ -302,9 +303,9 @@ void thread_function(void* arg)
 			// -1 is for slave
 			if( all_events[i].data.fd == -1 )
 			{
-				printf("I AM A SLAVE\n");
+				// printf("I AM A SLAVE\n");
 				// Master has got something.
-				printf("Master has got something for me\n");
+				// printf("Master has got something for me\n");
 				struct client_s* cli = &clients[*clients_count];
 				int read_desc = read_descriptor(slave,cli); 
 				cli->client_fd = read_desc;
@@ -330,8 +331,7 @@ void thread_function(void* arg)
 				Write(cli->client_fd, greeting, strlen(greeting), cli);	
 				// Clients increased
 				(*clients_count)++;
-				increment_thread_count();
-				printf("THREAD %d Clients count : %d \n",thread_no,*clients_count);
+				// printf("THREAD %d Clients count : %d \n",thread_no,*clients_count);
 				// Go to the next iteration.
 				continue;
 			}
@@ -367,7 +367,7 @@ void thread_function(void* arg)
 					// Clean up the entries on the structure, so that this is not used again
 					Write(fd_cli_control, file_done, strlen(file_done), &clients[cur_cid]);
 					clean_up_client_structure(&clients[cur_cid]);
-					printf("Done\n");
+					// printf("Done\n");
 				}
 				else if( read_n == -1 )
 				{
@@ -489,7 +489,6 @@ int main()
 			exit(0);
 		}
 		slave_fd_array[i] = slave_temp;
-		printf("%d \n",i);
 	}
 	printf("All slaves are registered");
 	printf("\nNow, listening on port 21 for clients\n");
@@ -500,7 +499,6 @@ int main()
         	printf("pthread create error in main");
         	exit(0);
         }
-	int total_clients_count = 0;
 	int client_sock;
 	int index;
 
@@ -527,7 +525,7 @@ int main()
 		index = total_clients_count/CLIENTS_PER_THREAD;
 		// Send to the FD present on the slave array at this index
 		Write(slave_fd_array[index], (char*)&client_sock, FD_SIZE, NULL);
-		printf("Written a new client:%d to %d thread\n",client_sock,index);
+		// printf("Written a new client:%d to %d thread\n",client_sock,index);
 		total_clients_count++;
 	}
 }
