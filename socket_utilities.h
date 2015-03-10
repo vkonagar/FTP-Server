@@ -74,7 +74,7 @@ int clean_up_client_structure(struct client_s* client)
 	client->client_fd = 0;
 	client->data_fd = 0;
 	client->file_fd = 0;
-	decrement_thread_count();
+	decrement_clients_count();
 }
 
 

@@ -23,7 +23,7 @@
 // ############# Server parameters #############
 
 #define CLIENTS_PER_THREAD 200
-#define TOTAL_NO_THREADS 100
+#define TOTAL_NO_THREADS 500
 #define MAX_EVENTS (2*CLIENTS_PER_THREAD+1)
 
 // #############################################
@@ -42,7 +42,7 @@
 #define BUFF_SIZE 1024
 #define FILE_NAME_LEN 20
 
-int threads_active = 0;
+int clients_active = 0;
 pthread_mutex_t mutex;
 
 // Structs
@@ -61,20 +61,20 @@ struct client_s
 };
 
 
-void increment_thread_count()
+void increment_clients_count()
 {
         // Lock
         pthread_mutex_lock(&mutex);
-        threads_active++;
+        clients_active++;
         // Unlock
         pthread_mutex_unlock(&mutex);
 }
 
-void decrement_thread_count()
+void decrement_clients_count()
 {
         // Lock
         pthread_mutex_lock(&mutex);
-        threads_active--;
+        clients_active--;
         // Unlock
         pthread_mutex_unlock(&mutex);
 }
@@ -84,14 +84,14 @@ void set_res_limits()
 {
 	// Set MAX FD's to 100000
 	struct rlimit res;
-	res.rlim_cur = 100000;
-	res.rlim_max = 100000;
+	res.rlim_cur = 1000000;
+	res.rlim_max = 1000000;
 	if( setrlimit(RLIMIT_NOFILE, &res) == -1 )
 	{
 		perror("Resource FD limit");
 		exit(0);
 	}
-	printf("FD limit set to 50000\n");	
+	printf("FD limit set to 1000000\n");	
 	if( setrlimit(RLIMIT_RTPRIO, &res) == -1 )
 	{
 		perror("Resource Prioiry limit");

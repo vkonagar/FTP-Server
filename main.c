@@ -9,13 +9,12 @@
 struct sockaddr_in master_server_addr;
 
 
-int total_clients_count = 0;
 
 void monitor()
 {
 	while(1)
 	{
-		printf("Count : %d\n",total_clients_count);
+		printf("Count : %d\n",clients_active);
 		sleep(2);
 	}
 }
@@ -389,6 +388,7 @@ void thread_function(void* arg)
 
 int main()
 {
+	int total_clients_count = 0;
 	// Change the current working directory to the FILES folder.
 	if( chdir("../FTP_FILES") == -1 )
 	{
@@ -526,6 +526,7 @@ int main()
 		// Send to the FD present on the slave array at this index
 		Write(slave_fd_array[index], (char*)&client_sock, FD_SIZE, NULL);
 		// printf("Written a new client:%d to %d thread\n",client_sock,index);
+		increment_clients_count();
 		total_clients_count++;
 	}
 }
