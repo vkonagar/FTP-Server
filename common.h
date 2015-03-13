@@ -1,5 +1,6 @@
 #ifndef COMMON_HEADERS
 #define COMMON_HEADERS
+#define _GNU_SOURCE
 
 // General
 #include <limits.h>
@@ -14,6 +15,8 @@
 #include <sys/types.h>
 #include <pthread.h>
 #include <assert.h>
+#include <sched.h>
+
 // Networking
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -25,6 +28,7 @@
 #define CLIENTS_PER_THREAD 200
 #define TOTAL_NO_THREADS 500
 #define MAX_EVENTS (2*CLIENTS_PER_THREAD+1)
+#define NO_OF_CORES 24
 
 // #############################################
 

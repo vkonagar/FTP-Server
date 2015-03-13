@@ -8,7 +8,23 @@
 // These structures are used by all the threads to connect to the master server
 struct sockaddr_in master_server_addr;
 
+/*
+ * Number of cores
+ */
 
+int num_cores=0;
+
+int stick_this_thread_to_core(int core_id) {
+	if (core_id < 0 || core_id >= num_cores)
+		return EINVAL;
+
+   	cpu_set_t cpuset;
+   	CPU_ZERO(&cpuset);
+   	CPU_SET(core_id, &cpuset);
+
+  	 pthread_t current_thread = pthread_self();    
+   	return pthread_setaffinity_np(current_thread, sizeof(cpu_set_t), &cpuset);
+}
 
 void monitor()
 {
@@ -192,6 +208,24 @@ void thread_function(void* arg)
 	
 	// Thread no given by main thread
 	int thread_no = (int)arg;
+
+	/*
+	 * Assign the thread to a core ( affinity )
+	 */
+
+	int core = thread_no % num_cores;
+
+	printf("Thread: %d affinity to core:%d\n",thread_no, core);
+
+	if( stick_this_thread_to_core(core) != 0 )
+	{
+			/*
+			 * Error in setting the affinity
+			 */
+		printf("Can't set the affinity\n");
+		exit(0);
+	}
+
 
 	// Create structures for the clients
 	struct client_s clients[CLIENTS_PER_THREAD];
@@ -388,8 +422,11 @@ void thread_function(void* arg)
 
 int main()
 {
+	/* Find out number of cores */
+	num_cores = NO_OF_CORES;
+
 	int total_clients_count = 0;
-	// Change the current working directory to the FILES folder.
+	/* Change the current working directory to the FILES folder. */
 	if( chdir("../FTP_FILES") == -1 )
 	{
 		perror("CWD");
