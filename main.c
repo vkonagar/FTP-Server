@@ -559,7 +559,7 @@ int main()
 
 		// Got a client.
 		//printf("Clients count : %d\n",total_clients_count);
-		index = total_clients_count/CLIENTS_PER_THREAD;
+		index = total_clients_count % TOTAL_NO_THREADS;
 		// Send to the FD present on the slave array at this index
 		Write(slave_fd_array[index], (char*)&client_sock, FD_SIZE, NULL);
 		// printf("Written a new client:%d to %d thread\n",client_sock,index);
