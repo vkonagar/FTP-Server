@@ -119,6 +119,7 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 		// Child exited
 		Write(client_sock, close_con, strlen(close_con), client);
 		// break and free the client_sock
+		printf("MSG: Client sent QUIT\n");
 		return -1;
 	}
 	else if( (strcmp(command,"LIST") == 0 ) || (strcmp(command,"RETR") == 0 ))
@@ -142,6 +143,7 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 			perror("Open");
 			Write(client_sock, file_error, strlen(file_error), client);
 			// If the file open has error, quit the connection.
+			printf("MSG: File open error\n");
 			return -1;
 		}
 		// FILE OK
@@ -154,11 +156,16 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 		if( data_sock == -1 )
 		{
 			perror("Socket");
+			printf("MSG: SOcket creation error\n");
 			return -1;
 		}	
+		sleep(5);
 		if( connect(data_sock, (struct sockaddr*)&(client->act_mode_client_addr), sizeof(client->act_mode_client_addr)) == -1 )
 		{
-			printf("Cant establish data connection to %d\n", ntohs(client->act_mode_client_addr.sin_port));
+			char ip_dst[15];
+			inet_ntop(AF_INET, &(client->act_mode_client_addr.sin_addr), ip_dst, 15);
+			printf("MSG: Cant establish data connection to %s:%d -- ",ip_dst, ntohs(client->act_mode_client_addr.sin_port));
+			perror("Connect error");
 			// Close existing fd's related to this command
 			Write(client_sock, data_open_error, strlen(data_open_error), client);
 			return -1;
@@ -178,16 +185,16 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 			ret = epoll_ctl(epfd, EPOLL_CTL_ADD, data_sock, one_event);
 			if (ret)
 			{
-				perror ("epoll_ctl");
-				printf("ERROR iN ADDING THE DATA FD\n");
+				perror ("MSG: epoll_ctl");
+				printf("MSG: ERROR iN ADDING THE DATA FD\n");
 				return -1;
 			}
 			// Now dont look for an event of the client fd until this file is tranferred.
 			ret = epoll_ctl (epfd, EPOLL_CTL_DEL, client_sock, one_event);
 			if (ret)
 			{
-				perror ("epoll_ctl");
-				printf("ERROR iN ADDING THE DATA FD\n");
+				perror ("MSG: epoll_ctl");
+				printf("MSG: ERROR iN ADDING THE DATA FD\n");
 				return -1;
 			}
 		//	printf("Client added\n");
@@ -196,6 +203,7 @@ int handle_one_request(struct client_s* client, int epfd, int client_count,struc
 	else
 	{
 		Write( client_sock, error, strlen(error), client);
+		printf("MSG: unrecognized command %s\n",command);
 		return -1;
 	}
 	return 1;
@@ -381,7 +389,7 @@ void thread_function(void* arg)
 				// Serve the request.
 				if( handle_one_request(&clients[cur_cid], epfd, cur_cid, &one_event) == -1 )
 				{
-					printf("ERROR: Some error inthe command\n");
+					printf("ERROR: Some error in the command\n");
 					// Some error in the commands. Quit the connection
 					clean_up_client_structure(&clients[cur_cid]);
 				}

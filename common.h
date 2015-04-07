@@ -25,8 +25,8 @@
 #include <sys/select.h>
 // ############# Server parameters #############
 
-#define CLIENTS_PER_THREAD 20
-#define TOTAL_NO_THREADS 100
+#define CLIENTS_PER_THREAD 10
+#define TOTAL_NO_THREADS 1000
 #define MAX_EVENTS (2*CLIENTS_PER_THREAD+1)
 #define NO_OF_CORES 24
 
@@ -38,7 +38,6 @@
 #define TRUE 1
 #define FALSE 0
 #define BACKLOG 100000
-#define MAX_OPEN_DESC 1024
 #define THREAD_PRIORITY_LOW 20
 #define THREAD_PRIORITY_HIGH 50
 #define REQ_COMMAND_LENGTH 20
