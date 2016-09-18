@@ -1,16 +1,9 @@
 #include "common.h"
-#ifndef PROTO
-#define PROTO
 #include "protocol.h"
-#endif
 #include "socket_utilities.h"
 
 // These structures are used by all the threads to connect to the master server
 struct sockaddr_in master_server_addr;
-
-/*
- * Number of cores
- */
 
 int num_cores=0;
 
